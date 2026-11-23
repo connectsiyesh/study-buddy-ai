@@ -67,6 +67,16 @@
           margin-top:12px; animation: fade .5s ease; }
   .card h3 { margin:0 0 6px; }
   .card p { margin:0; line-height:1.65; }
+
+  /* NEW: icon toolbar (Listen, Stop, Copy) */
+  .tools { display:flex; align-items:center; justify-content:center; gap:12px; margin:10px 0 4px; }
+  .icon { width:52px; height:52px; border-radius:50%; border:2px solid #60a5fa; cursor:pointer;
+          background:rgba(30,58,138,.45); color:#e0e7ff; font-size:1.4rem;
+          display:flex; align-items:center; justify-content:center;
+          transition: transform .2s, box-shadow .2s; }
+  .icon:hover, .icon:active { transform:scale(1.12); box-shadow:0 0 18px rgba(96,165,250,.8); }
+  .icon.playing { background:#3b82f6; box-shadow:0 0 18px rgba(96,165,250,.9); }
+  .copied { color:#86efac; font-weight:700; min-width:80px; text-align:left; }
 </style>
 </head>
 <body>
@@ -184,8 +194,10 @@
 
   // ---------- Screens ----------
   let topic = '', subject = '';
+  let current = null;   // the latest explanation from the AI (used by Listen and Copy)
 
   function go(id) {
+    stopListen();       // stop any voice when changing screens
     document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
     document.getElementById(id).classList.add('active');
     window.scrollTo(0, 0);
@@ -255,13 +267,67 @@
   }
 
   function showResult(d) {
+    current = d;
     const cards = d.items.map(i =>
       '<div class="card"><h3>' + esc(i.emoji) + ' ' + esc(i.heading) + '</h3><p>' + esc(i.text) + '</p></div>'
     ).join('');
     document.getElementById('result').innerHTML =
       '<div class="rtitle">' + esc(d.title) + '</div>' +
-      '<div class="tag">' + esc(subject) + '</div>' + cards;
+      '<div class="tag">' + esc(subject) + '</div>' +
+      // NEW: the icon buttons
+      '<div class="tools">' +
+        '<button class="icon" id="listenBtn" onclick="listen()" title="Listen" aria-label="Listen">🔊</button>' +
+        '<button class="icon" onclick="stopListen()" title="Stop" aria-label="Stop">⏹</button>' +
+        '<button class="icon" onclick="copyNotes()" title="Copy" aria-label="Copy">📋</button>' +
+        '<span class="copied" id="copiedMsg"></span>' +
+      '</div>' + cards;
     go('s6');
+  }
+
+  // ---------- NEW: Listen (reads the whole topic aloud) ----------
+  function listen() {
+    if (!current) return;
+    if (!('speechSynthesis' in window)) { alert('Sorry, your browser cannot read aloud.'); return; }
+    window.speechSynthesis.cancel();                    // stop anything already playing
+    const parts = [current.title].concat(current.items.map(i => i.heading + '. ' + i.text));
+    parts.forEach((p, idx) => {
+      const u = new SpeechSynthesisUtterance(p);
+      if (idx === parts.length - 1) u.onend = () => setPlaying(false);
+      u.onerror = () => setPlaying(false);
+      window.speechSynthesis.speak(u);                  // each part is queued, one after another
+    });
+    setPlaying(true);
+  }
+
+  // NEW: Stop reading
+  function stopListen() {
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    setPlaying(false);
+  }
+
+  // Highlights the Listen button while the voice is playing
+  function setPlaying(on) {
+    const b = document.getElementById('listenBtn');
+    if (b) b.classList.toggle('playing', on);
+  }
+
+  // ---------- NEW: Copy the whole explanation ----------
+  async function copyNotes() {
+    if (!current) return;
+    const text = current.title + ' (' + subject + ')\n\n' +
+      current.items.map(i => i.heading + '\n' + i.text).join('\n\n');
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      // Fallback for browsers that block the clipboard
+      const t = document.createElement('textarea');
+      t.value = text; document.body.appendChild(t); t.select();
+      try { document.execCommand('copy'); } catch (e2) {}
+      document.body.removeChild(t);
+    }
+    const msg = document.getElementById('copiedMsg');
+    msg.textContent = 'Copied!';
+    setTimeout(() => { msg.textContent = ''; }, 2000);
   }
 
   function restart() {
